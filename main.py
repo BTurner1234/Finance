@@ -1,6 +1,7 @@
 import streamlit as st
+import pandas as pd
 
-# ---- Tax and deduction functions ----
+# ---- Tax and deduction functions (same as before) ----
 def income_tax(salary):
     tax = 0
     if salary > 125140:
@@ -51,7 +52,6 @@ def national_insurance(salary):
 # ---- Streamlit app ----
 st.title("UK Take-home Pay & Cost Calculator")
 
-# Salary as text input (no spinner)
 salary_str = st.text_input("Enter your gross annual salary (£):", "30000")
 try:
     salary = float(salary_str)
@@ -66,31 +66,64 @@ with col1:
 with col2:
     has_postgrad_loan = st.checkbox("Postgraduate loan")
 
-# Regular expenses
-rent = st.number_input("Monthly rent (£):", min_value=0.0, value=800.0, step=10.0, format="%.2f")
-food = st.number_input("Weekly food (£):", min_value=0.0, value=50.0, step=1.0, format="%.2f")
+# Plain text input for rent and food
+rent_str = st.text_input("Monthly rent (£):", "800")
+food_str = st.text_input("Weekly food (£):", "50")
+try:
+    rent = float(rent_str)
+except:
+    rent = 0.0
+try:
+    food = float(food_str)
+except:
+    food = 0.0
 
-# Other expenses (dynamic)
-st.markdown("**Other Expenses (e.g. subscriptions, bills, travel, etc.)**")
-expense_count = st.number_input("How many other expense items would you like to enter?", min_value=0, max_value=20, value=0, step=1)
+# EXPENSES: Use session_state for dynamic expenses table
+if "user_expenses" not in st.session_state:
+    st.session_state.user_expenses = []
 
-other_expenses = []
-for i in range(expense_count):
+with st.form(key="add_expense_form"):
     cols = st.columns([3, 2, 2])
     with cols[0]:
-        desc = st.text_input(f"Description #{i+1}", key=f"desc_{i}")
+        exp_desc = st.text_input("Description", key="desc_new")
     with cols[1]:
-        amt = st.number_input("Amount (£):", min_value=0.0, value=0.0, key=f"amt_{i}", format="%.2f")
+        exp_amt_str = st.text_input("Amount (£)", "0", key="amt_new")
     with cols[2]:
-        freq = st.selectbox("Frequency", ["Weekly", "Monthly"], key=f"freq_{i}")
-    other_expenses.append((desc, amt, freq))
+        exp_freq = st.selectbox("Frequency", ["Weekly", "Monthly"], key="freq_new")
+    add = st.form_submit_button("Add Expense")
+
+if add:
+    try:
+        exp_amt = float(exp_amt_str)
+    except:
+        exp_amt = 0.0
+    st.session_state.user_expenses.append((exp_desc, exp_amt, exp_freq))
+
+# Option to clear all extra expenses
+st.markdown("#### Current Extra Expenses")
+if st.session_state.user_expenses:
+    # Format for display
+    display_expenses = []
+    for d, a, f in st.session_state.user_expenses:
+        display_expenses.append({
+            "Description": d, 
+            "Amount": f"£{a:,.2f}",
+            "Frequency": f
+        })
+    df = pd.DataFrame(display_expenses)
+    st.write(df.to_html(index=False, escape=False), unsafe_allow_html=True)
+else:
+    st.caption("No extra expenses added.")
+
+# Yearly/monthly toggle
+period = st.radio("View breakdown as:", ("Yearly", "Monthly"))
 
 # Annualize all expenses
 annual_rent = rent * 12
 annual_food = food * 52
 annual_other = 0
 expense_summary = []
-for desc, amt, freq in other_expenses:
+for desc, amt, freq in st.session_state.user_expenses:
     if freq == "Weekly":
         v = amt * 52
     else:
@@ -98,35 +131,61 @@ for desc, amt, freq in other_expenses:
     annual_other += v
     expense_summary.append((desc, v))
 
-# Tax and loan deductions
+# Tax and loan deductions (annual)
 tax = income_tax(salary)
 loan1 = undergraduate_loan(salary) if has_undergrad_loan else 0
 loan2 = postgraduate_loan(salary) if has_postgrad_loan else 0
 ni = national_insurance(salary)
-
-# Total costs
 total_expenses = annual_rent + annual_food + annual_other
-
-# Final take-home pay calculation
 total_deductions = tax + loan1 + loan2 + ni + total_expenses
-take_home = salary - (tax + loan1 + loan2 + ni + total_expenses)
+take_home = salary - total_deductions
+
+# Monthly values
+monthly_salary = salary / 12
+monthly_tax = tax / 12
+monthly_ni = ni / 12
+monthly_loan1 = loan1 / 12
+monthly_loan2 = loan2 / 12
+monthly_expenses = total_expenses / 12
+monthly_take_home = take_home / 12
 
 if salary:
-    st.header(f"Your take-home pay (after tax and expenses): £{take_home:,.2f}")
-    st.subheader(f"Your total yearly costs (excluding tax/loans/NI): £{total_expenses:,.2f}")
+    if period == "Yearly":
+        st.header(f"Your take-home pay (after tax and expenses): £{take_home:,.2f} per year")
+        st.subheader(f"Your total yearly costs (excluding tax/loans/NI): £{total_expenses:,.2f}")
+    else:
+        st.header(f"Your take-home pay (after tax and expenses): £{monthly_take_home:,.2f} per month")
+        st.subheader(f"Your total monthly costs (excluding tax/loans/NI): £{monthly_expenses:,.2f}")
 
     with st.expander("Expand to see full breakdown..."):
-        st.write("##### Taxes & Deductions")
-        st.write(f"Income Tax: £{tax:,.2f}")
-        st.write(f"National Insurance: £{ni:,.2f}")
-        st.write(f"Undergraduate Loan: £{loan1:,.2f}")
-        st.write(f"Postgraduate Loan: £{loan2:,.2f}")
-        st.write(" ")
-        st.write("##### Living and Other Expenses")
-        st.write(f"Rent: £{annual_rent:,.2f}")
-        st.write(f"Food: £{annual_food:,.2f}")
-        for desc, v in expense_summary:
-            st.write(f"{desc or 'Other'}: £{v:,.2f}")
-
+        if period == "Yearly":
+            st.write("##### Taxes & Deductions (Yearly)")
+            st.write(f"Income Tax: £{tax:,.2f}")
+            st.write(f"National Insurance: £{ni:,.2f}")
+            st.write(f"Undergraduate Loan: £{loan1:,.2f}")
+            st.write(f"Postgraduate Loan: £{loan2:,.2f}")
+            st.write(" ")
+            st.write("##### Living and Other Expenses (Yearly)")
+            st.write(f"Rent: £{annual_rent:,.2f}")
+            st.write(f"Food: £{annual_food:,.2f}")
+            for desc, v in expense_summary:
+                st.write(f"{desc or 'Other'}: £{v:,.2f}")
+        else:
+            st.write("##### Taxes & Deductions (Monthly)")
+            st.write(f"Income Tax: £{monthly_tax:,.2f}")
+            st.write(f"National Insurance: £{monthly_ni:,.2f}")
+            st.write(f"Undergraduate Loan: £{monthly_loan1:,.2f}")
+            st.write(f"Postgraduate Loan: £{monthly_loan2:,.2f}")
+            st.write(" ")
+            st.write("##### Living and Other Expenses (Monthly)")
+            st.write(f"Rent: £{rent:,.2f}")
+            st.write(f"Food: £{food:,.2f}")
+            for idx, (desc, v) in enumerate(expense_summary):
+                freq = st.session_state.user_expenses[idx][2]
+                if freq == "Weekly":
+                    monthly_v = v / 12
+                else:
+                    monthly_v = v / 12
+                st.write(f"{desc or 'Other'}: £{monthly_v:,.2f}")
 else:
     st.info("Please enter your salary to calculate results.")
